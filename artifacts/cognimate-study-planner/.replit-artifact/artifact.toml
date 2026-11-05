@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "CogniMate Study Planner"
+description = "A Hong Kong student study planner with grade-specific schedules, exams, subjects, AI tutoring, study resources, and focus tools."
+version = "1.0.0"
+id = "artifacts/cognimate-study-planner"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18171
+
+[services.development]
+run = "pnpm --filter @workspace/cognimate-study-planner run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cognimate-study-planner", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/cognimate-study-planner/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18171"
+BASE_PATH = "/"
