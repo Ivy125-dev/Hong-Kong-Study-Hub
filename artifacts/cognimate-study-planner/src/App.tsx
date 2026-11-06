@@ -5,6 +5,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter, Link } from 'wouter';
+import { useHashLocation } from 'wouter/use-hash-location';
+import { getChapterSummaries, getStudyResources, type ResourceCategory } from '@/lib/study-resources';
 import {
   AlarmClock, ArrowDownToLine, ArrowRight, BookOpen, CalendarDays, Check, CheckCircle2, ChevronDown, CircleHelp, Clock3,
   Download, FileText, Flame, FolderOpen, GraduationCap, Headphones, Home, Library, ListChecks, Moon, MoreHorizontal,
@@ -29,7 +31,6 @@ const KEY='cognimate-workspace-v1';
 const uid=()=>`${Date.now().toString(36)}${Math.random().toString(36).slice(2,7)}`;
 const load=():State=>{try{const raw=localStorage.getItem(KEY);return raw?{...initial,...JSON.parse(raw)}:initial;}catch{return initial;}};
 const fmt=(date:string)=>date?new Date(`${date}T12:00:00`).toLocaleDateString('en-HK',{day:'numeric',month:'short'}):'Choose a date';
-const escapeSearch=(s:string)=>encodeURIComponent(s);
 function localDateKey(date=new Date()){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 function recordStudyDay(profile:Profile){const today=localDateKey();if(profile.lastStudyDate===today)return profile;const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);return {...profile,streak:profile.lastStudyDate===localDateKey(yesterday)?profile.streak+1:1,lastStudyDate:today};}
 
@@ -42,7 +43,8 @@ function useWorkspace(){
 function hexToHsl(hex:string){const r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;const max=Math.max(r,g,b),min=Math.min(r,g,b);let h=0,s=0,l=(max+min)/2;if(max!==min){const d=max-min;s=l>.5?d/(2-max-min):d/(max+min);switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}h/=6;}return `${Math.round(h*360)} ${Math.round(s*100)}% ${Math.round(l*100)}%`;}
 
 function App(){
- return <QueryClientProvider client={new QueryClient()}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/,'')}><RoutedErrorBoundary><Switch>
+ const routerHook=window.location.protocol==='file:'?useHashLocation:undefined;
+ return <QueryClientProvider client={new QueryClient()}><TooltipProvider><WouterRouter hook={routerHook} base={import.meta.env.BASE_URL.replace(/\/$/,'')}><RoutedErrorBoundary><Switch>
    <Route path="/" component={Workspace}/><Route path="/planner" component={Workspace}/><Route path="/exams" component={Workspace}/><Route path="/tutor" component={Workspace}/><Route path="/papers" component={Workspace}/><Route path="/resources" component={Workspace}/><Route path="/materials" component={Workspace}/><Route path="/settings" component={Workspace}/><Route component={NotFound}/>
  </Switch></RoutedErrorBoundary></WouterRouter><Toaster/></TooltipProvider></QueryClientProvider>;
 }
@@ -167,48 +169,44 @@ function Tutor({data}:{data:State}){
 }
 
 function Papers({data}:{data:State}){
- const [grade,setGrade]=useState(data.profile?.exactGrade||'');const [subject,setSubject]=useState('all');const subjects=data.profile!.subjects;const availableSubjects=subjectsFor(grade).filter(s=>subjects.includes(s));
-  const senior=(g:string)=>/^HK S[456]$/.test(g);
-  const paperSources:Array<{title:string;source:string;gradeMatch:(g:string)=>boolean;subject?:string;url:string;access:string}>=[
-    {title:'2025/26 Chinese Literature mock paper · Paper 1',source:'Recurso · free PDF',gradeMatch:senior,subject:'Chinese Literature',url:'https://recurso.com.hk/wp-content/uploads/2526-RECURSO-CHLIT-1.pdf',access:'Open PDF'},
-    {title:'2025/26 Chinese Literature mock paper · Paper 2',source:'Recurso · free PDF',gradeMatch:senior,subject:'Chinese Literature',url:'https://recurso.com.hk/wp-content/uploads/2526-RECURSO-CHLIT-2.pdf',access:'Open PDF'},
-    {title:'2025 DSE Geography Paper 1 MC · practice and solutions',source:'Recurso · free online resource',gradeMatch:senior,subject:'Geography',url:'https://recurso.com.hk/dse-a/geog/p1mc-2025/',access:'Open practice'},
-    {title:'HKDSE past papers and marking schemes catalogue',source:'HKEAA official catalogue · access and fees vary',gradeMatch:senior,url:'https://www.hkeaa.edu.hk/en/resources/publications/list_of_publications/hkdse_erqp_pub/',access:'Browse catalogue'},
-    {title:'Cambridge IGCSE past papers and syllabuses',source:'Cambridge International · access restrictions may apply',gradeMatch:(g:string)=>g==='IGCSE',url:'https://www.cambridgeinternational.org/programmes-and-qualifications/cambridge-igcse/',access:'Browse official site'},
-    {title:'IB Diploma Programme assessment and examinations',source:'International Baccalaureate · official information',gradeMatch:(g:string)=>g==='IB',url:'https://www.ibo.org/programmes/diploma-programme/assessment-and-exams/',access:'Browse official site'},
-  ].filter(r=>r.gradeMatch(grade)).filter(r=>!r.subject||(subject==='all'?availableSubjects.includes(r.subject):subject===r.subject));
- return <div style={{display:'grid',gap:20}}><section className="surface papers-intro"><div><div className="eyebrow">PRACTICE WITH PURPOSE</div><h2 className="serif">Find a paper. Build your confidence.</h2><p>Links lead to public source pages. Check each provider for the current subject and grade materials.</p></div><div className="paper-filter"><label>Grade<select className="field" value={grade} onChange={e=>{setGrade(e.target.value);setSubject('all');}}>{gradeOptions.map(g=><option key={g}>{g}</option>)}</select></label><label>Subject<select className="field" value={availableSubjects.includes(subject)?subject:'all'} onChange={e=>setSubject(e.target.value)}><option value="all">All selected subjects</option>{availableSubjects.map(s=><option key={s}>{s}</option>)}</select></label></div></section>
-  <div className="paper-columns"><section className="surface paper-category"><div className="category-title"><div className="category-icon unavailable"><Sparkles size={18}/></div><div><h3 className="serif">AI-made papers</h3><p>Generated to match your class</p></div></div><div className="unavailable-panel"><div className="status-off">Unavailable</div><p>AI paper generation isn’t connected. No sample or downloadable paper is generated here.</p><button className="btn" disabled title="No authorized AI provider">Generate a paper</button></div></section>
-     <section className="surface paper-category"><div className="category-title"><div className="category-icon"><BookOpen size={18}/></div><div><h3 className="serif">Online-found papers</h3><p>Links filtered for your grade and subject</p></div></div><div className="external-papers">{paperSources.map(r=><a key={r.url} className="external-paper" href={r.url} target="_blank" rel="noreferrer"><div><b>{r.title}{r.subject&&<> <span className="tag inline-tag">{r.subject}</span></>}</b><span>{r.source} · {r.access}</span></div><ExternalLink size={16}/></a>)}{!paperSources.length&&<EmptyState icon={FileText} title="No verified paper link for this selection" text="No mock paper is fabricated here. See Learning resources for curriculum materials, or check back when a suitable source is available."/>}</div><div className="microcopy">HKEAA catalogue access and fees vary. Recurso PDFs open directly. External sites may change their content or availability.</div></section></div>
+ const [grade,setGrade]=useState(data.profile!.exactGrade);const [subject,setSubject]=useState('all');const availableSubjects=subjectsFor(grade);
+ const visibleSubjects=subject==='all'?availableSubjects:[subject];
+ const papers=visibleSubjects.map(name=>({name,resources:getStudyResources(grade,name).filter(item=>item.category==='Mock papers')})).filter(group=>group.resources.length);
+ return <div style={{display:'grid',gap:20}}>
+  <section className="surface papers-intro"><div><div className="eyebrow">PRACTICE WITH PURPOSE</div><h2 className="serif">Mock papers and past exams</h2><p>Browse papers by curriculum, grade and subject. Official sources may have school access or purchase requirements.</p><Link href="/resources" className="text-link">Open the complete resource hub <ArrowRight size={14}/></Link></div><div className="paper-filter"><label>Grade<select className="field" value={grade} onChange={e=>{setGrade(e.target.value);setSubject('all');}}>{gradeOptions.map(g=><option key={g}>{g}</option>)}</select></label><label>Subject<select className="field" value={availableSubjects.includes(subject)?subject:'all'} onChange={e=>setSubject(e.target.value)}><option value="all">All subjects</option>{availableSubjects.map(name=><option key={name}>{name}</option>)}</select></label></div></section>
+  <section className="surface paper-category"><div className="category-title"><div className="category-icon"><FileText size={18}/></div><div><h3 className="serif">{grade} papers</h3><p>{subject==='all'?'Grouped by subject':'Filtered to '+subject}</p></div></div>
+   {papers.length?<div className="paper-subject-list">{papers.map(group=><section className="paper-subject-block" key={group.name}><h4>{group.name}</h4><div className="external-papers">{group.resources.map(item=><a key={item.url} className="external-paper" href={item.url} target="_blank" rel="noreferrer"><div><b>{item.title}</b><span>{item.provider} · {item.access}</span></div><ExternalLink size={16}/></a>)}</div></section>)}</div>:<EmptyState icon={FileText} title="No public full mock paper listed for this selection" text="Some schools and exam boards restrict full papers. Open the resource hub for chapter summaries, revision notes and teaching materials for this subject."/>}
+   <div className="microcopy">Papers are linked from their publishers or exam authorities. Confirm the syllabus code, subject level and exam year before practising.</div>
+  </section>
  </div>;
 }
 
 function Resources({data}:{data:State}){
-  const [subject,setSubject]=useState(data.profile!.subjects[0]||'');const [topic,setTopic]=useState('');const grade=data.profile!.exactGrade;const enteredTopics=topic.split(',').map(x=>x.trim()).filter(Boolean);
-  const examTopics=data.exams.filter(e=>e.subject===subject).flatMap(e=>e.topics).filter(Boolean);
-  const buildUrl=(searchTerm:string)=>`https://www.youtube.com/results?search_query=${escapeSearch(`${grade} ${subject} ${searchTerm} exam topic explanation`)}`;
-  const defaultTopics=subject==='Mathematics'?['Algebra','Fractions','Geometry','Statistics']:subject==='English'?['Reading comprehension','Writing skills','Grammar']:subject==='Chinese'?['閱讀理解','寫作','詞語運用']:['Key concepts','Exam revision','Topic overview'];
-  const activeTopics=enteredTopics.length?enteredTopics:examTopics.length?examTopics.slice(0,6):defaultTopics;
-  const isSenior=(g:string)=>/^HK S[456]$/.test(g);
-  const learningResources=[
-    {title:'Primary school curriculum learning materials',source:'Hong Kong Education Bureau · official',url:'https://www.edb.gov.hk/en/curriculum-development/major-level-of-edu/primary/materials/index.html',gradeMatch:(g:string)=>g.startsWith('HK P'),subjects:null as string[]|null},
-    {title:'Junior secondary Mathematics learning materials',source:'Hong Kong Education Bureau · official',url:'https://www.edb.gov.hk/en/curriculum-development/kla/ma/res/js/handout.html',gradeMatch:(g:string)=>/^HK S[123]$/.test(g),subjects:['Mathematics']},
-    {title:'Senior secondary Mathematics learning materials',source:'Hong Kong Education Bureau · official',url:'https://www.edb.gov.hk/en/curriculum-development/kla/ma/res/ss/handoutss.html',gradeMatch:isSenior,subjects:['Mathematics']},
-    {title:'Secondary English learning and teaching resources',source:'Hong Kong Education Bureau · official',url:'https://www.edb.gov.hk/en/curriculum-development/kla/eng-edu/references-resources/resource%20sec_AaL.html',gradeMatch:(g:string)=>/^HK S[123456]$/.test(g),subjects:['English']},
-    {title:'Free DSE learning resources and topic materials',source:'Recurso · nonprofit study resources',url:'https://recurso.com.hk/',gradeMatch:isSenior,subjects:['Geography','Chinese History','Chinese Literature','Economics','ICT','Design and Applied Technology']},
-    {title:'Cambridge IGCSE syllabuses and resources',source:'Cambridge International · official',url:'https://www.cambridgeinternational.org/programmes-and-qualifications/cambridge-igcse/',gradeMatch:(g:string)=>g==='IGCSE',subjects:null as string[]|null},
-    {title:'IB Diploma Programme resources and assessment information',source:'International Baccalaureate · official',url:'https://www.ibo.org/programmes/diploma-programme/assessment-and-exams/',gradeMatch:(g:string)=>g==='IB',subjects:null as string[]|null},
-  ].filter(r=>r.gradeMatch(grade)&&(!r.subjects||r.subjects.includes(subject)));
-  const verifiedVideos=[
-    {title:'HKDSE Mathematics lessons',source:'Mathman · YouTube playlist',url:'https://www.youtube.com/playlist?list=PLmZxH815Q2ONXKegBXNvS5kwsQp27E_Rc',gradeMatch:isSenior,subject:'Mathematics'},
-    {title:'HKDSE Geography Paper 1 MC solutions',source:'Recurso · YouTube playlist',url:'https://www.youtube.com/playlist?list=PLoTUg3P5RYXxrqCIsshYvV7nFhSPaOH2u',gradeMatch:isSenior,subject:'Geography'},
-  ].filter(v=>v.gradeMatch(grade)&&v.subject===subject);
-  return <div style={{display:'grid',gap:20}}>
-    <section className="surface resources-hero"><div className="resource-orbit"><Video size={24}/></div><div><div className="eyebrow">LEARN ANOTHER WAY</div><h2 className="serif">A fresh explanation can unlock it.</h2><p>Videos and learning materials match your grade and selected subject.</p></div><div className="resource-selects"><label>Subject<select className="field" value={subject} onChange={e=>setSubject(e.target.value)}>{data.profile!.subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>Add or change exam topics<input className="field" value={topic} onChange={e=>setTopic(e.target.value)} placeholder={examTopics.length?examTopics.slice(0,2).join(', '):'e.g. fractions, algebra'} /></label></div></section>
-    <section className="surface paper-category"><div className="category-title"><div className="category-icon"><BookOpen size={18}/></div><div><h3 className="serif">Teaching resources & notes</h3><p>Separate from practice papers; matched to {grade} · {subject}</p></div></div><div className="external-papers">{learningResources.map(r=><a key={r.url} className="external-paper" href={r.url} target="_blank" rel="noreferrer"><div><b>{r.title}</b><span>{r.source} · Open resource</span></div><ExternalLink size={16}/></a>)}{!learningResources.length&&<EmptyState icon={BookOpen} title="No verified learning link for this subject yet" text="Try your school materials library or upload your own notes."/>}</div><div className="microcopy">External sources are not hosted by CogniMate. Confirm the syllabus and level on the provider’s page.</div></section>
-    {verifiedVideos.length>0&&<section className="surface paper-category"><div className="category-title"><div className="category-icon"><Video size={18}/></div><div><h3 className="serif">Verified video playlists</h3><p>Direct YouTube playlists for {grade} · {subject}</p></div></div><div className="external-papers">{verifiedVideos.map(v=><a key={v.url} className="external-paper" href={v.url} target="_blank" rel="noreferrer"><div><b>{v.title}</b><span>{v.source} · Open playlist</span></div><ExternalLink size={16}/></a>)}</div></section>}
-    <section className="surface paper-category"><div className="category-title"><div className="category-icon"><Video size={18}/></div><div><h3 className="serif">Videos for your exam topics</h3><p>{examTopics.length&&!enteredTopics.length?'Using topics from your saved exams.':'Search links include your grade, subject and topic.'}</p></div></div><div className="topic-grid">{activeTopics.map(t=><a className="surface topic-card" href={buildUrl(t)} target="_blank" rel="noreferrer" key={t}><div className="topic-thumb"><Video size={24}/><span>YOUTUBE TOPIC SEARCH</span></div><div className="topic-copy"><span className="tag">{grade} · {subject}</span><h3 className="serif">{t}</h3><div>Open YouTube results <ExternalLink size={14}/></div></div></a>)}</div><div className="microcopy">Topic searches open YouTube results, not a pre-verified individual video. Direct playlists above are linked only where verified for this subject.</div></section>
-  </div>;
+ const categories:('all'|'summaries'|ResourceCategory)[]=['all','summaries','Mock papers','Notes','Teaching materials'];
+ const [grade,setGrade]=useState(data.profile!.exactGrade);const [subject,setSubject]=useState('all');const [category,setCategory]=useState<typeof categories[number]>('all');const [search,setSearch]=useState('');
+ const availableSubjects=subjectsFor(grade);const query=search.trim().toLowerCase();
+ const subjects=availableSubjects.filter(name=>subject==='all'||name===subject).filter(name=>{
+  if(!query)return true;
+  return name.toLowerCase().includes(query)||getChapterSummaries(name).some(chapter=>`${chapter.title} ${chapter.summary}`.toLowerCase().includes(query))||getStudyResources(grade,name).some(item=>`${item.title} ${item.provider} ${item.access}`.toLowerCase().includes(query));
+ });
+ const categoryTitle:Record<typeof categories[number],string>={all:'All resources',summaries:'Chapter summaries','Mock papers':'Mock papers','Notes':'Notes','Teaching materials':'Teaching materials'};
+ const categoriesForSubject:ResourceCategory[]=['Mock papers','Notes','Teaching materials'];
+ return <div className="resource-hub">
+  <section className="surface resource-hub-tools"><div className="resource-hub-heading"><div><div className="eyebrow">CURRICULUM RESOURCE HUB</div><h2 className="serif">Study by subject, at your level.</h2><p>Chapter guides, exam practice and carefully selected learning sources in one place.</p></div><div className="tag">{grade.startsWith('HK')?'Hong Kong curriculum':grade==='IGCSE'?'Cambridge IGCSE':'IB Diploma Programme'}</div></div>
+   <div className="resource-hub-filters"><label>Grade<select className="field" value={grade} onChange={e=>{setGrade(e.target.value);setSubject('all');}}>{gradeOptions.map(option=><option key={option}>{option}</option>)}</select></label><label>Subject<select className="field" value={availableSubjects.includes(subject)?subject:'all'} onChange={e=>setSubject(e.target.value)}><option value="all">All subjects ({availableSubjects.length})</option>{availableSubjects.map(name=><option key={name}>{name}</option>)}</select></label><label className="resource-search-label">Find a topic or resource<input className="field" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search summaries and sources"/></label></div>
+   <div className="segmented resource-tabs" aria-label="Resource type">{categories.map(item=><button type="button" className={category===item?'selected':''} key={item} onClick={()=>setCategory(item)}>{categoryTitle[item]}</button>)}</div>
+  </section>
+  {subjects.length?<div className="resource-subject-grid">{subjects.map(name=>{
+   const chapterSummaries=getChapterSummaries(name);const resources=getStudyResources(grade,name);
+   const showSummaries=category==='all'||category==='summaries';
+  const shownCategories=category==='all'?categoriesForSubject:category==='summaries'?[]:categoriesForSubject.filter(item=>item===category);
+   return <section className="surface resource-subject" key={name}><div className="resource-subject-heading"><div><div className="eyebrow">{grade} · SUBJECT</div><h3 className="serif">{name}</h3></div><span className="count-pill">{chapterSummaries.length+resources.length}</span></div>
+    {showSummaries&&<div className="resource-kind"><div className="resource-kind-heading"><BookOpen size={16}/><h4>Chapter summaries</h4></div><div className="summary-list">{chapterSummaries.map(chapter=><article className="summary-item" key={chapter.title}><h5>{chapter.title}</h5><p>{chapter.summary}</p></article>)}</div></div>}
+    {shownCategories.map(kind=>{const links=resources.filter(item=>item.category===kind);return <div className="resource-kind" key={kind}><div className="resource-kind-heading"><FileText size={16}/><h4>{kind}</h4></div>{links.length?<div className="resource-link-list">{links.map(item=><a className="external-paper" href={item.url} target="_blank" rel="noreferrer" key={`${item.provider}-${item.url}`}><div><b>{item.title}</b><span>{item.provider} · {item.access}</span></div><ExternalLink size={15}/></a>)}</div>:<p className="resource-no-link">No public full paper or dedicated link is listed for this subject and grade. Check school-provided materials and confirm coverage against your syllabus.</p>}</div>;})}
+   </section>;
+  })}</div>:<div className="surface resource-no-results"><Search size={20}/><b>No subjects or resources match this search.</b><button className="text-link" onClick={()=>{setSearch('');setSubject('all');}}>Clear filters <X size={14}/></button></div>}
+  <p className="microcopy resource-hub-note">External materials are hosted by their publishers. Access terms vary; always confirm the subject code, grade and current syllabus before using a resource.</p>
+ </div>;
 }
 
 const IDB='cognimate-files';const STORE='materials';
